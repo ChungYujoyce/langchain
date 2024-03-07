@@ -165,6 +165,9 @@ class HuggingFacePipeline(LLM):
         **kwargs: Any,
     ) -> str:
         response = self.pipeline(prompt)
+        # import pdb
+        # pdb.set_trace()
+        
         if self.pipeline.task == "text-generation":
             # Text generation return includes the starter text.
             text = response[0]["generated_text"][len(prompt) :]

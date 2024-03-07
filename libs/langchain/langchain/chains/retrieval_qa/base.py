@@ -22,8 +22,15 @@ from langchain.pydantic_v1 import Extra, Field, root_validator
 from langchain.schema import BaseRetriever, Document
 from langchain.schema.language_model import BaseLanguageModel
 from langchain.vectorstores.base import VectorStore
+from rank_bm25 import BM25Okapi
+import re
+import nltk
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
-
+    
 class BaseRetrievalQA(Chain):
     """Base class for question-answering chains."""
 
@@ -205,6 +212,53 @@ class RetrievalQA(BaseRetrievalQA):
     """
 
     retriever: BaseRetriever = Field(exclude=True)
+    
+    
+    def clean_text(self, text: str) -> str:
+        
+        # Convert text to lowercase
+        text = text.lower()
+        
+        # Remove stopwords from text using regex
+        stopwords_list = set(nltk.corpus.stopwords.words('english'))
+        stopwords_pattern = r'\b(?:{})\b'.format('|'.join(stopwords_list))
+        text = re.sub(stopwords_pattern, '', text)
+
+        # Replace punctuation, newline, tab with space
+        text = re.sub(r'[,.!?|]|[\n\t]', ' ', text)
+        # Replace multiple spaces with single space
+        text = re.sub(r'\s+', ' ', text)
+        
+        text = text.strip()
+        
+        return text
+    
+    
+    def _get_docs_bm25(
+        self,
+        question: str,
+        documents: List[Document],
+    ) -> List[Document]:
+        
+        # Tokenize documents
+        tokenized_documents = [self.clean_text(doc.page_content).split(" ") for doc in documents]
+        
+        # Tokenize query
+        tokenized_query = self.clean_text(question).split(" ")
+
+        # Create BM25 object
+        bm25 = BM25Okapi(tokenized_documents)
+        
+        # Get BM25 scores
+        bm25_scores = bm25.get_scores(tokenized_query)
+
+        # Sort documents by BM25 scores
+        k = self.retriever.search_kwargs["k"]
+        sorted_results = sorted(zip(documents, bm25_scores), key=lambda x: x[1], reverse=True)
+        new_documents = [r[0] for r in sorted_results][:k // 2]
+        
+        return new_documents
+        
 
     def _get_docs(
         self,
@@ -213,10 +267,14 @@ class RetrievalQA(BaseRetrievalQA):
         run_manager: CallbackManagerForChainRun,
     ) -> List[Document]:
         """Get docs."""
-        return self.retriever.get_relevant_documents(
+        documents = self.retriever.get_relevant_documents(
             question, callbacks=run_manager.get_child()
         )
-
+        
+        documents = self._get_docs_bm25(question, documents)
+        return documents
+        
+    
     async def _aget_docs(
         self,
         question: str,
@@ -224,9 +282,11 @@ class RetrievalQA(BaseRetrievalQA):
         run_manager: AsyncCallbackManagerForChainRun,
     ) -> List[Document]:
         """Get docs."""
-        return await self.retriever.aget_relevant_documents(
+        documents = await self.retriever.aget_relevant_documents(
             question, callbacks=run_manager.get_child()
         )
+        documents = self._get_docs_bm25(question, documents)
+        return documents
 
     @property
     def _chain_type(self) -> str:

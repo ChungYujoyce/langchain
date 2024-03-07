@@ -123,6 +123,7 @@ class StuffDocumentsChain(BaseCombineDocumentsChain):
         """
         # Format each document according to the prompt
         doc_strings = [format_document(doc, self.document_prompt) for doc in docs]
+        # doc_strings = [f"Document {i+1}:\n{d}" for i, d in enumerate(doc_strings)]
         # Join the documents together to put them in the prompt.
         inputs = {
             k: v
