@@ -20,6 +20,7 @@ from langchain.chains.question_answering.stuff_prompt import PROMPT_SELECTOR
 from langchain.prompts import PromptTemplate
 from langchain.pydantic_v1 import Extra, Field, root_validator
 from langchain.schema import BaseRetriever, Document
+from langchain_core.retrievers import BaseRetriever as BaseRetriever_core
 from langchain.schema.language_model import BaseLanguageModel
 from langchain.vectorstores.base import VectorStore
 from rank_bm25 import BM25Okapi
@@ -212,6 +213,7 @@ class RetrievalQA(BaseRetrievalQA):
     """
 
     retriever: BaseRetriever = Field(exclude=True)
+    retriever_bm25: BaseRetriever_core = Field(exclude=True)
     
     
     def clean_text(self, text: str) -> str:
@@ -230,7 +232,7 @@ class RetrievalQA(BaseRetrievalQA):
         text = re.sub(r'\s+', ' ', text)
         
         text = text.strip()
-        
+        text = text.split(" ")
         return text
     
     
@@ -241,10 +243,10 @@ class RetrievalQA(BaseRetrievalQA):
     ) -> List[Document]:
         
         # Tokenize documents
-        tokenized_documents = [self.clean_text(doc.page_content).split(" ") for doc in documents]
+        tokenized_documents = [self.clean_text(doc.page_content) for doc in documents]
         
         # Tokenize query
-        tokenized_query = self.clean_text(question).split(" ")
+        tokenized_query = self.clean_text(question)
 
         # Create BM25 object
         bm25 = BM25Okapi(tokenized_documents)
@@ -267,11 +269,16 @@ class RetrievalQA(BaseRetrievalQA):
         run_manager: CallbackManagerForChainRun,
     ) -> List[Document]:
         """Get docs."""
-        documents = self.retriever.get_relevant_documents(
-            question, callbacks=run_manager.get_child()
-        )
-        
-        documents = self._get_docs_bm25(question, documents)
+        if '-' in question:
+            documents = self.retriever_bm25.get_relevant_documents(
+                question, callbacks=run_manager.get_child()
+            )
+        else:
+            documents = self.retriever.get_relevant_documents(
+                question, callbacks=run_manager.get_child()
+            )
+
+            documents = self._get_docs_bm25(question, documents)
         return documents
         
     
