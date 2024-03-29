@@ -5,6 +5,7 @@ import inspect
 import warnings
 from abc import abstractmethod
 from typing import Any, Dict, List, Optional
+import datetime
 
 from langchain.callbacks.manager import (
     AsyncCallbackManagerForChainRun,
@@ -77,6 +78,7 @@ class BaseRetrievalQA(Chain):
         **kwargs: Any,
     ) -> BaseRetrievalQA:
         """Initialize from LLM."""
+        start_time = datetime.datetime.now()
         _prompt = prompt or PROMPT_SELECTOR.get_prompt(llm)
         llm_chain = LLMChain(llm=llm, prompt=_prompt, callbacks=callbacks)
         document_prompt = PromptTemplate(
@@ -88,7 +90,8 @@ class BaseRetrievalQA(Chain):
             document_prompt=document_prompt,
             callbacks=callbacks,
         )
-
+        end_time = datetime.datetime.now()
+        print("from_llm time: ",end_time - start_time)
         return cls(
             combine_documents_chain=combine_documents_chain,
             callbacks=callbacks,
@@ -104,10 +107,13 @@ class BaseRetrievalQA(Chain):
         **kwargs: Any,
     ) -> BaseRetrievalQA:
         """Load chain from chain type."""
+        start_time = datetime.datetime.now()
         _chain_type_kwargs = chain_type_kwargs or {}
         combine_documents_chain = load_qa_chain(
             llm, chain_type=chain_type, **_chain_type_kwargs
         )
+        end_time = datetime.datetime.now()
+        print("from_chain_type time: ",end_time - start_time)
         return cls(combine_documents_chain=combine_documents_chain, **kwargs)
 
     @abstractmethod
@@ -253,10 +259,13 @@ class RetrievalQA(BaseRetrievalQA):
         
         # Get BM25 scores
         bm25_scores = bm25.get_scores(tokenized_query)
+        print(bm25_scores)
 
         # Sort documents by BM25 scores
         k = self.retriever.search_kwargs["k"]
         sorted_results = sorted(zip(documents, bm25_scores), key=lambda x: x[1], reverse=True)
+        for res in sorted_results:
+            print("score: ", res[1], " ",res[0])
         new_documents = [r[0] for r in sorted_results][:k // 2]
         
         return new_documents
@@ -270,15 +279,25 @@ class RetrievalQA(BaseRetrievalQA):
     ) -> List[Document]:
         """Get docs."""
         if '-' in question:
+            start_time = datetime.datetime.now()
             documents = self.retriever_bm25.get_relevant_documents(
                 question, callbacks=run_manager.get_child()
             )
+            documents1 = self._get_docs_bm25(question, documents)
+            end_time = datetime.datetime.now()
+            print("_get_docs retriever_bm25 time: ",end_time - start_time)
         else:
+            start_time = datetime.datetime.now()
             documents = self.retriever.get_relevant_documents(
                 question, callbacks=run_manager.get_child()
             )
+            end_time = datetime.datetime.now()
+            print("_get_docs retriever + time: ",end_time - start_time)
 
+            start_time = datetime.datetime.now()
             documents = self._get_docs_bm25(question, documents)
+            end_time = datetime.datetime.now()
+            print("_get_docs _get_docs_bm25 time: ",end_time - start_time)
         return documents
         
     
