@@ -24,6 +24,14 @@ from langchain.chains.combine_documents.stuff import StuffDocumentsChain
 from langchain.chains.llm import LLMChain
 from langchain.chains.question_answering import load_qa_chain
 from langchain.chains.question_answering.stuff_prompt import PROMPT_SELECTOR
+from langchain_core.retrievers import BaseRetriever as BaseRetriever_core
+from rank_bm25 import BM25Okapi
+import re
+import nltk
+try:
+    nltk.data.find('corpora/stopwords')
+except LookupError:
+    nltk.download('stopwords')
 
 
 class BaseRetrievalQA(Chain):
@@ -210,6 +218,53 @@ class RetrievalQA(BaseRetrievalQA):
     """
 
     retriever: BaseRetriever = Field(exclude=True)
+    retriever_bm25: BaseRetriever_core = Field(exclude=True)
+
+    def clean_text(self, text: str) -> str:
+        
+        # Convert text to lowercase
+        text = text.lower()
+        
+        # Remove stopwords from text using regex
+        stopwords_list = set(nltk.corpus.stopwords.words('english'))
+        stopwords_pattern = r'\b(?:{})\b'.format('|'.join(stopwords_list))
+        text = re.sub(stopwords_pattern, '', text)
+
+        # Replace punctuation, newline, tab with space
+        text = re.sub(r'[,.!?|]|[\n\t]', ' ', text)
+        # Replace multiple spaces with single space
+        text = re.sub(r'\s+', ' ', text)
+        
+        text = text.strip()
+        text = text.split(" ")
+        return text
+    
+    
+    def _get_docs_bm25(
+        self,
+        question: str,
+        documents: List[Document],
+    ) -> List[Document]:
+        
+        # Tokenize documents
+        tokenized_documents = [self.clean_text(doc.page_content) for doc in documents]
+        
+        # Tokenize query
+        tokenized_query = self.clean_text(question)
+
+        # Create BM25 object
+        bm25 = BM25Okapi(tokenized_documents)
+        
+        # Get BM25 scores
+        bm25_scores = bm25.get_scores(tokenized_query)
+
+        # Sort documents by BM25 scores
+        k = self.retriever.search_kwargs["k"]
+        sorted_results = sorted(zip(documents, bm25_scores), key=lambda x: x[1], reverse=True)
+        new_documents = [r[0] for r in sorted_results][:k // 2]
+        
+        return new_documents
+
 
     def _get_docs(
         self,
@@ -218,9 +273,17 @@ class RetrievalQA(BaseRetrievalQA):
         run_manager: CallbackManagerForChainRun,
     ) -> List[Document]:
         """Get docs."""
-        return self.retriever.get_relevant_documents(
-            question, callbacks=run_manager.get_child()
-        )
+        if '-' in question:
+            documents = self.retriever_bm25.get_relevant_documents(
+                question, callbacks=run_manager.get_child()
+            )
+        else:
+            documents = self.retriever.get_relevant_documents(
+                question, callbacks=run_manager.get_child()
+            )
+
+            documents = self._get_docs_bm25(question, documents)
+        return documents
 
     async def _aget_docs(
         self,
